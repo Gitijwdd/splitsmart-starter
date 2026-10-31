@@ -43,12 +43,24 @@ export default function Home() {
 
   const total = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
-  const addExpense = () => {
-    const t = text.trim();
-    if (!t) return;
-    setExpenses((list) => [...list, parseExpense(t)]);
+  const addExpense = async () => {
+  const t = text.trim();
+  if (!t) return;
+  try {
+    const res = await fetch('/api/split', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sentence: t }),
+    });
+    const data = await res.json();
+    if (data.error) { alert('AI error: ' + data.error); return; }
+    setExpenses((list) => [...list, {
+      id: 'e-' + Date.now(), emoji: '🧾',
+      name: data.description || t, paidBy: 'You', amount: data.amount || 0,
+    }]);
     setText('');
-  };
+  } catch (e) { alert('Could not reach the AI: ' + e.message); }
+};
 
   const removeExpense = (id) => setExpenses((list) => list.filter((e) => e.id !== id));
 
