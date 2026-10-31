@@ -15,6 +15,7 @@ export default function Home() {
   const [expenses, setExpenses] = useState(SEED);
   const [text, setText] = useState('');
   const [ready, setReady] = useState(false);
+  const [openPayerId, setOpenPayerId] = useState(null);
 
   // Load any saved expenses from the browser on first render.
   useEffect(() => {
@@ -32,6 +33,25 @@ export default function Home() {
     }
   }, [expenses, ready]);
 
+  useEffect(() => {
+    if (!openPayerId) return;
+    const menu = document.getElementById(`payer-menu-${openPayerId}`);
+    menu?.querySelector('[role="menuitemradio"]')?.focus();
+  }, [openPayerId]);
+
+  useEffect(() => {
+    if (!openPayerId) return;
+    const closeOnOutsideClick = (event) => {
+      if (!(event.target instanceof Element)) return;
+      const picker = event.target.closest('[data-payer-picker]');
+      if (picker?.getAttribute('data-payer-picker') !== openPayerId) {
+        setOpenPayerId(null);
+      }
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick, true);
+  }, [openPayerId]);
+
   const total = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
   const addExpense = async () => {
@@ -45,14 +65,15 @@ export default function Home() {
       });
       const data = await res.json();
       if (data.error) { alert('AI error: ' + data.error); return; }
-      
+      const people = Array.isArray(data.people) ? data.people : [];
+
       setExpenses((list) => [...list, {
         id: 'e-' + Date.now(), 
         emoji: '🧾',
         name: data.description || t, 
-        paidBy: 'You', 
+        paidBy: people.includes('You') ? 'You' : people[0] || 'You',
         amount: data.amount || 0,
-        people: data.people || [], // Saves array of names (e.g. ["You", "Raj", "Priya"])
+        people,
         each: data.each || 0       // Saves amount per person
       }]);
       setText('');
@@ -60,6 +81,9 @@ export default function Home() {
   };
 
   const removeExpense = (id) => setExpenses((list) => list.filter((e) => e.id !== id));
+  const updatePayer = (id, paidBy) => setExpenses((list) =>
+    list.map((e) => e.id === id ? { ...e, paidBy } : e)
+  );
 
   return (
     <main style={styles.page}>
@@ -96,7 +120,72 @@ export default function Home() {
               <div style={styles.itemEmoji}>{e.emoji}</div>
               <div style={styles.itemMain}>
                 <div style={styles.itemName}>{e.name}</div>
-                <div style={styles.itemPaid}>paid by {e.paidBy}</div>
+                <div style={styles.itemPaid}>
+                  paid by{' '}
+                  {e.people && e.people.length > 0 ? (
+                    <span
+                      className="payer-picker"
+                      data-payer-picker={e.id}
+                      onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget)) setOpenPayerId(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          setOpenPayerId(null);
+                          event.currentTarget.querySelector('[aria-haspopup="menu"]')?.focus();
+                          event.stopPropagation();
+                        } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                          const options = Array.from(event.currentTarget.querySelectorAll('[role="menuitemradio"]'));
+                          const currentIndex = options.indexOf(document.activeElement);
+                          if (currentIndex >= 0) {
+                            event.preventDefault();
+                            const nextIndex = event.key === 'Home' ? 0
+                              : event.key === 'End' ? options.length - 1
+                                : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+                            options[nextIndex]?.focus();
+                          } else if (event.target === event.currentTarget.querySelector('[aria-haspopup="menu"]')) {
+                            event.preventDefault();
+                            setOpenPayerId(e.id);
+                          }
+                        }
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="payer-select"
+                        aria-haspopup="menu"
+                        aria-expanded={openPayerId === e.id}
+                        aria-controls={`payer-menu-${e.id}`}
+                        aria-label={`Paid by ${e.paidBy}. Choose payer for ${e.name}`}
+                        onClick={() => setOpenPayerId((id) => id === e.id ? null : e.id)}
+                      >
+                        {e.paidBy}
+                        <span className="payer-chevron" aria-hidden="true" />
+                      </button>
+                      {openPayerId === e.id && (
+                        <div className="payer-menu" id={`payer-menu-${e.id}`} role="menu" aria-label={`Choose who paid for ${e.name}`}>
+                          {e.people.map((person) => (
+                            <button
+                              key={person}
+                              type="button"
+                              className="payer-option"
+                              role="menuitemradio"
+                              aria-checked={e.paidBy === person}
+                              onClick={() => {
+                                updatePayer(e.id, person);
+                                setOpenPayerId(null);
+                                document.querySelector(`[data-payer-picker="${e.id}"] [aria-haspopup="menu"]`)?.focus();
+                              }}
+                            >
+                              <span>{person}</span>
+                              {e.paidBy === person && <span className="payer-check" aria-hidden="true">✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </span>
+                  ) : e.paidBy}
+                </div>
                 
                 {/* Renders split breakdown if people array exists */}
                 {e.people && e.people.length > 0 && (
