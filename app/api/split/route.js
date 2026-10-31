@@ -9,8 +9,11 @@ export async function POST(req) {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt =
       'You turn a plain-English expense sentence into a bill split. ' +
-      'Return ONLY strict JSON with these keys: amount (number, the total), ' +
-      'people (whole number, how many share it), each (number, amount per person), ' +
+      'Identify everyone mentioned (treating "me" or "I" as "You"). ' +
+      'Return ONLY strict JSON with these keys: ' +
+      'amount (number, the total), ' +
+      'people (array of strings with the names of everyone sharing it, e.g., ["You", "Raj", "Priya"]), ' +
+      'each (number, amount per person), ' +
       'description (short text). No markdown, no extra words.\n\nSentence: "' + sentence + '"';
     // The free AI can be busy — try up to 3 times before giving up.
     let response;

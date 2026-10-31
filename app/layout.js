@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  title: "Soham's SplitSmart",
+  title: 'Udhaar Manager',
   description: 'Split expenses with your group — the easy way.',
 };
 

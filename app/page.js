@@ -11,15 +11,6 @@ const SEED = [
 
 const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 
-// Basic "parse an expense from text" — just enough to work. In Hour 3 you'll replace
-// this naive version with a real AI call (Gemini) that understands messy human sentences.
-function parseExpense(text) {
-  const amountMatch = text.match(/\d[\d,]*(\.\d+)?/);
-  const amount = amountMatch ? Number(amountMatch[0].replace(/,/g, '')) : 0;
-  const name = text.replace(/\d[\d,]*(\.\d+)?/, '').replace(/\s+/g, ' ').trim() || 'Expense';
-  return { id: 'e-' + Date.now(), emoji: '🧾', name: name.charAt(0).toUpperCase() + name.slice(1), paidBy: 'You', amount };
-}
-
 export default function Home() {
   const [expenses, setExpenses] = useState(SEED);
   const [text, setText] = useState('');
@@ -44,23 +35,29 @@ export default function Home() {
   const total = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
   const addExpense = async () => {
-  const t = text.trim();
-  if (!t) return;
-  try {
-    const res = await fetch('/api/split', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sentence: t }),
-    });
-    const data = await res.json();
-    if (data.error) { alert('AI error: ' + data.error); return; }
-    setExpenses((list) => [...list, {
-      id: 'e-' + Date.now(), emoji: '🧾',
-      name: data.description || t, paidBy: 'You', amount: data.amount || 0,
-    }]);
-    setText('');
-  } catch (e) { alert('Could not reach the AI: ' + e.message); }
-};
+    const t = text.trim();
+    if (!t) return;
+    try {
+      const res = await fetch('/api/split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentence: t }),
+      });
+      const data = await res.json();
+      if (data.error) { alert('AI error: ' + data.error); return; }
+      
+      setExpenses((list) => [...list, {
+        id: 'e-' + Date.now(), 
+        emoji: '🧾',
+        name: data.description || t, 
+        paidBy: 'You', 
+        amount: data.amount || 0,
+        people: data.people || [], // Saves array of names (e.g. ["You", "Raj", "Priya"])
+        each: data.each || 0       // Saves amount per person
+      }]);
+      setText('');
+    } catch (e) { alert('Could not reach the AI: ' + e.message); }
+  };
 
   const removeExpense = (id) => setExpenses((list) => list.filter((e) => e.id !== id));
 
@@ -70,8 +67,8 @@ export default function Home() {
         {/* Header */}
         <div style={styles.header}>
           <div style={styles.brand}>
-            <div style={styles.logo}>S</div>
-            <div style={styles.title}>Soham&apos;s SplitSmart</div>
+            <div style={styles.logo}>UM</div>
+            <div style={styles.title}>Udhaar Manager</div>
           </div>
           <div style={styles.groupPill}>My Group</div>
         </div>
@@ -100,6 +97,13 @@ export default function Home() {
               <div style={styles.itemMain}>
                 <div style={styles.itemName}>{e.name}</div>
                 <div style={styles.itemPaid}>paid by {e.paidBy}</div>
+                
+                {/* Renders split breakdown if people array exists */}
+                {e.people && e.people.length > 0 && (
+                  <div style={styles.itemSplit}>
+                    Split with: {e.people.join(', ')} ({inr(e.each)} each)
+                  </div>
+                )}
               </div>
               <div style={styles.itemAmount}>{inr(e.amount)}</div>
               <button style={styles.remove} onClick={() => removeExpense(e.id)} aria-label={`Remove ${e.name}`}>×</button>
@@ -174,6 +178,7 @@ const styles = {
   itemMain: { flex: 1, minWidth: 0 },
   itemName: { fontWeight: 700, fontSize: 15 },
   itemPaid: { color: 'var(--muted)', fontSize: 12.5, marginTop: 1 },
+  itemSplit: { color: '#1749A6', fontSize: 12, fontWeight: 600, marginTop: 3 }, // Styling for the split details line
   itemAmount: { fontWeight: 800, fontSize: 15.5, fontVariantNumeric: 'tabular-nums' },
   remove: {
     flex: 'none', width: 26, height: 26, borderRadius: 8, border: 'none',
