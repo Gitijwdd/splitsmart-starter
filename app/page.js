@@ -59,7 +59,7 @@ export default function Home() {
         <div style={styles.header}>
           <div style={styles.brand}>
             <div style={styles.logo}>S</div>
-            <div style={styles.title}>SplitSmart</div>
+            <div style={styles.title}>Soham&apos;s SplitSmart</div>
           </div>
           <div style={styles.groupPill}>My Group</div>
         </div>
@@ -146,8 +146,8 @@ const styles = {
   },
   addBtn: {
     flex: 'none', width: 48, borderRadius: 14, border: 'none', color: '#fff', fontSize: 24, fontWeight: 700,
-    background: 'linear-gradient(135deg, var(--blue), var(--cyan))',
-    boxShadow: '0 10px 22px -8px rgba(28,95,212,.6)',
+    background: '#1749A6',
+    boxShadow: '0 10px 22px -8px rgba(23,73,166,.6)',
   },
   list: { display: 'flex', flexDirection: 'column', gap: 10, minHeight: 60 },
   empty: { color: 'var(--muted)', fontSize: 14, textAlign: 'center', padding: '24px 0' },
