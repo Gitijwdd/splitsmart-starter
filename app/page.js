@@ -79,7 +79,7 @@ export default function Home() {
     return (
       <main style={styles.page}>
         <div style={styles.card}>
-          <div style={styles.header}><div style={styles.brand}><div style={styles.logo}>S</div><div style={styles.title}>SplitSmart</div></div></div>
+        <div style={styles.header}><div style={styles.brand}><div style={styles.logo}>UM</div><div style={styles.title}>Udhaar Manager</div></div></div>
           <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>Sign in to see your expenses on any device.</p>
           <input style={styles.input2} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
           <input style={styles.input2} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (6+ characters)" />
@@ -97,7 +97,7 @@ export default function Home() {
     <main style={styles.page}>
       <div style={styles.card}>
         <div style={styles.header}>
-          <div style={styles.brand}><div style={styles.logo}>S</div><div style={styles.title}>SplitSmart</div></div>
+          <div style={styles.brand}><div style={styles.logo}>UM</div><div style={styles.title}>Udhaar Manager</div></div>
           <button style={styles.signout} onClick={signOut}>Sign out</button>
         </div>
         <div style={styles.addRow}>
