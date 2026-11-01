@@ -39,8 +39,8 @@ export default function Home() {
       .then(({ data }) => {
         const formatted = (data || []).map((e) => ({
           ...e,
-          people: e.people || ['You'],
-          each: e.each || e.amount
+          people: e.people && e.people.length > 0 ? e.people : ['You'],
+          each: e.each || (e.amount / (e.people?.length || 1))
         }));
         setExpenses(formatted);
       });
@@ -108,9 +108,8 @@ export default function Home() {
 
       const payer = data.paidBy || 'You';
       const peopleList = data.people && data.people.length > 0 ? data.people : ['You'];
-      const eachAmount = data.each || data.amount || 0;
+      const eachAmount = data.each || (data.amount / peopleList.length) || 0;
 
-      // Now saving people and each directly to Supabase columns
       const { data: rows, error } = await supabase.from('expenses')
         .insert({ 
           user_id: session.user.id, 
@@ -176,7 +175,7 @@ export default function Home() {
         {groupId ? (
           <>
             <div style={styles.addRow}>
-              <input style={styles.input} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addExpense()} placeholder="Add an expense (e.g. surfing with mahesh and om for 2700)…" />
+              <input style={styles.input} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addExpense()} placeholder="Add an expense" />
               <button style={styles.addBtn} onClick={addExpense}>+</button>
             </div>
             <div style={styles.list}>
