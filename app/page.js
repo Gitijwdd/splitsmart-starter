@@ -30,8 +30,11 @@ export default function Home() {
   const [loadingChat, setLoadingChat] = useState(false);
   const [sendingChat, setSendingChat] = useState(false);
   const [chatError, setChatError] = useState('');
+  const [chatProfiles, setChatProfiles] = useState({});
+  const [profileSaveError, setProfileSaveError] = useState('');
   const [chatConnectionStatus, setChatConnectionStatus] = useState('offline');
   const [text, setText] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authMsg, setAuthMsg] = useState('');
@@ -103,6 +106,7 @@ export default function Home() {
     let active = true;
     activeChatGroupIdRef.current = groupId;
     setChatMessages([]);
+    setChatProfiles({});
     setChatDraft('');
     setChatError('');
 
@@ -126,6 +130,15 @@ export default function Home() {
           setChatMessages((messages) => mergeChatMessages(messages, [message]));
         }
       })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'group_profiles'
+      }, ({ new: profile }) => {
+        if (active && profile?.user_id && profile?.username) {
+          setChatProfiles((profiles) => ({ ...profiles, [profile.user_id]: profile.username }));
+        }
+      })
       .subscribe((status) => {
         if (!active) return;
         if (status === 'SUBSCRIBED') {
@@ -138,14 +151,21 @@ export default function Home() {
 
     const loadMessages = async () => {
       try {
-        const { data, error } = await supabase
-          .from('group_messages')
-          .select('id, group_id, user_id, message, created_at')
-          .eq('group_id', groupId)
-          .order('created_at', { ascending: false })
-          .limit(100);
-        if (error) throw error;
-        if (active) setChatMessages((messages) => mergeChatMessages(messages, (data || []).reverse()));
+        const [messageResult, profileResult] = await Promise.all([
+          supabase
+            .from('group_messages')
+            .select('id, group_id, user_id, message, created_at')
+            .eq('group_id', groupId)
+            .order('created_at', { ascending: false })
+            .limit(100),
+          supabase.from('group_profiles').select('user_id, username')
+        ]);
+        if (messageResult.error) throw messageResult.error;
+        if (profileResult.error) throw profileResult.error;
+        if (active) {
+          setChatMessages((messages) => mergeChatMessages(messages, (messageResult.data || []).reverse()));
+          setChatProfiles(Object.fromEntries((profileResult.data || []).map((profile) => [profile.user_id, profile.username])));
+        }
       } catch (error) {
         if (active) setChatError(error.message || 'Could not load group messages.');
       } finally {
@@ -176,8 +196,61 @@ export default function Home() {
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
   }, [groupMenuOpen, groupId, groups]);
 
-  const signUp = async () => { setAuthMsg(''); const { error } = await supabase.auth.signUp({ email, password }); setAuthMsg(error ? error.message : 'Account created — you are signed in!'); };
-  const signIn = async () => { setAuthMsg(''); const { error } = await supabase.auth.signInWithPassword({ email, password }); if (error) setAuthMsg(error.message); };
+  const saveUsername = async (userId, value) => {
+    const { error } = await supabase.from('group_profiles').upsert({ user_id: userId, username: value });
+    if (error) throw error;
+    setProfileSaveError('');
+  };
+
+  const signUp = async () => {
+    setAuthMsg('');
+    setProfileSaveError('');
+    const cleanUsername = username.trim();
+    if (!cleanUsername || cleanUsername.length > 40) {
+      setAuthMsg('Enter a username between 1 and 40 characters.');
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { username: cleanUsername } }
+    });
+    if (error) {
+      setAuthMsg(error.message);
+    } else if (data.session) {
+      try {
+        await saveUsername(data.user.id, cleanUsername);
+        setAuthMsg('Account created — you are signed in!');
+      } catch (saveError) {
+        setProfileSaveError(saveError.message || 'Account created, but your username could not be saved.');
+      }
+    } else {
+      setAuthMsg('Account created. Check your email to confirm, then sign in.');
+    }
+  };
+
+  const signIn = async () => {
+    setAuthMsg('');
+    setProfileSaveError('');
+    const cleanUsername = username.trim();
+    if (!cleanUsername || cleanUsername.length > 40) {
+      setAuthMsg('Enter a username between 1 and 40 characters.');
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      setAuthMsg(error.message);
+      return;
+    }
+
+    try {
+      await saveUsername(data.user.id, cleanUsername);
+    } catch (saveError) {
+      setProfileSaveError(saveError.message || 'Signed in, but your username could not be saved.');
+    }
+  };
   const signOut = async () => {
     setSigningOut(true);
     setSignOutError('');
@@ -379,6 +452,17 @@ export default function Home() {
         <div style={styles.card}>
           <div style={styles.header}><div style={styles.brand}><div style={styles.logo}>UM</div><div style={styles.title}>Udhaar Manager</div></div></div>
           <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>Sign in to see your groups on any device.</p>
+          <input
+            style={styles.input2}
+            type="text"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="Username"
+            aria-label="Username"
+            autoComplete="nickname"
+            maxLength={40}
+            required
+          />
           <input style={styles.input2} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
           <input style={styles.input2} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (6+ characters)" />
           <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
@@ -386,6 +470,7 @@ export default function Home() {
             <button style={styles.authBtnAlt} onClick={signIn}>Sign in</button>
           </div>
           {authMsg && <div style={{ marginTop: 12, fontSize: 13, color: '#1C5FD4' }}>{authMsg}</div>}
+          {profileSaveError && <p role="alert" style={styles.dialogError}>{profileSaveError}</p>}
         </div>
       </main>
     );
@@ -548,7 +633,7 @@ export default function Home() {
       <section className="chat-card" aria-label="Group chat">
         <header className="chat-header">
           <div>
-            <h2 className="chat-title">Group chat</h2>
+            <h2 className="chat-title">Group members</h2>
             <p className="chat-subtitle">{currentGroup ? currentGroup.name : 'Join or create a group to chat'}</p>
           </div>
           {groupId && (
@@ -558,6 +643,7 @@ export default function Home() {
             </span>
           )}
         </header>
+        {profileSaveError && <p className="chat-error" role="alert">{profileSaveError}</p>}
         {groupId ? (
           <>
             <div className="chat-messages" ref={chatMessagesRef} aria-live="polite" aria-relevant="additions">
@@ -568,7 +654,7 @@ export default function Home() {
                 return (
                   <article key={message.id} className={`chat-message${ownMessage ? ' is-own' : ''}`}>
                     <div className="chat-message-meta">
-                      <span>{ownMessage ? 'You' : `Member ${message.user_id.slice(0, 6)}`}</span>
+                      <span>{chatProfiles[message.user_id] || (ownMessage ? username.trim() : 'Group member')}</span>
                       <time dateTime={message.created_at}>
                         {new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                       </time>

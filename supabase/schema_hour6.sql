@@ -102,6 +102,46 @@ create policy "see group expenses"    on expenses for select using (is_group_mem
 create policy "add group expenses"    on expenses for insert with check (is_group_member(group_id));
 create policy "delete group expenses" on expenses for delete using (is_group_member(group_id));
 
+create or replace function can_view_group_profile(profile_user_id uuid)
+returns boolean language sql security definer stable
+set search_path = public as $$
+  select exists (
+    select 1
+    from group_members viewer
+    join group_members profile_member on profile_member.group_id = viewer.group_id
+    where viewer.user_id = auth.uid()
+      and profile_member.user_id = profile_user_id
+  );
+$$;
+
+revoke all on function can_view_group_profile(uuid) from public;
+grant execute on function can_view_group_profile(uuid) to authenticated;
+
+create table if not exists group_profiles (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  username   text not null check (char_length(btrim(username)) between 1 and 40),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists group_members_user_id_group_id_idx
+  on group_members (user_id, group_id);
+
+alter table group_profiles enable row level security;
+
+drop policy if exists "see group profiles" on group_profiles;
+drop policy if exists "create own group profile" on group_profiles;
+drop policy if exists "update own group profile" on group_profiles;
+
+create policy "see group profiles" on group_profiles
+  for select using (user_id = auth.uid() or can_view_group_profile(user_id));
+create policy "create own group profile" on group_profiles
+  for insert with check (user_id = auth.uid());
+create policy "update own group profile" on group_profiles
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+revoke all on group_profiles from anon, authenticated;
+grant select, insert, update on group_profiles to authenticated;
+
 -- group chat messages are visible only to members; authors cannot impersonate another user.
 create table if not exists group_messages (
   id         uuid primary key default gen_random_uuid(),
@@ -134,5 +174,14 @@ begin
          and tablename = 'group_messages'
      ) then
     alter publication supabase_realtime add table public.group_messages;
+  end if;
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime'
+         and schemaname = 'public'
+         and tablename = 'group_profiles'
+     ) then
+    alter publication supabase_realtime add table public.group_profiles;
   end if;
 end $$;
