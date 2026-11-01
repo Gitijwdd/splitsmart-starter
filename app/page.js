@@ -816,13 +816,14 @@ export default function Home() {
     }
   };
 
+  const currentUserId = session?.user?.id;
   const owedTotals = new Map();
   expenses.forEach((expense) => {
-    const payerOptions = getExpensePayerOptions(expense, groupMembers, session.user.id);
+    const payerOptions = getExpensePayerOptions(expense, groupMembers, currentUserId);
     const payer = payerOptions.find((option) => option.user_id === expense.paid_by_user_id)
       || payerOptions.find((option) => option.name.toLocaleLowerCase() === String(expense.paid_by).toLocaleLowerCase())
       || payerOptions[0];
-    getExpenseDebts(expense, groupMembers, payer, session.user.id).forEach((debt) => {
+    getExpenseDebts(expense, groupMembers, payer, currentUserId).forEach((debt) => {
       const debtorKey = debt.userId ? `user:${debt.userId}` : `name:${String(debt.name).toLocaleLowerCase()}`;
       const payerKey = debt.payerId ? `user:${debt.payerId}` : `name:${String(debt.payerName).toLocaleLowerCase()}`;
       const key = JSON.stringify([debtorKey, payerKey]);
@@ -888,7 +889,7 @@ export default function Home() {
     })
     .filter(Boolean);
   const debtReminderSignature = JSON.stringify(netSettlements
-    .filter((settlement) => settlement.debtorUserId === session.user.id)
+    .filter((settlement) => settlement.debtorUserId === currentUserId)
     .map((settlement) => ({
       debtor_user_id: settlement.debtorUserId,
       payer_name: settlement.payer,
@@ -1221,38 +1222,28 @@ export default function Home() {
                   <div className="chat-messages" ref={chatMessagesRef} aria-live="polite" aria-relevant="additions">
                     {loadingChat && chatMessages.length === 0 && debtReminders.length === 0 && paymentNotifications.length === 0 && <p className="chat-empty">Loading notifications…</p>}
                     {!loadingChat && !chatError && chatMessages.length === 0 && debtReminders.length === 0 && paymentNotifications.length === 0 && <p className="chat-empty">No notifications yet.</p>}
-                    {debtReminders.map((reminder) => (
+                    {debtReminders.filter((reminder) => !reminder.paid_at).map((reminder) => (
                       <article
                         key={reminder.id}
-                        className={`chat-notification debt-reminder-notification${reminder.paid_at ? ' payment-confirmation-notification' : ''}`}
+                        className="chat-notification debt-reminder-notification"
                       >
                         <span className="chat-notification-avatar" aria-hidden="true">₹</span>
                         <div className="chat-notification-content">
                           <div className="chat-notification-meta">
-                            <strong>{reminder.paid_at ? 'Marked as paid' : 'Payment reminder'}</strong>
+                            <strong>Payment reminder</strong>
                             <time dateTime={reminder.updated_at}>
-                              {new Date(reminder.paid_at || reminder.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                              {new Date(reminder.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                             </time>
                           </div>
-                          <p>
-                            {reminder.paid_at
-                              ? `You marked ${inr(reminder.amount_cents / 100)} paid to ${reminder.payer_name}.`
-                              : `You owe ${inr(reminder.amount_cents / 100)} to ${reminder.payer_name}. Please settle this amount.`}
-                          </p>
-                          {!reminder.paid_at && reminder.payer_user_id ? (
-                            <button
-                              type="button"
-                              className="paid-reminder-button"
-                              onClick={() => confirmReminderPaid(reminder)}
-                              disabled={Boolean(payingReminderId)}
-                            >
-                              {payingReminderId === reminder.id ? 'Sending…' : 'Mark as paid'}
-                            </button>
-                          ) : !reminder.paid_at ? (
-                            <p className="reminder-unavailable">
-                              This payer is not a group member, so they cannot receive an in-app payment notification.
-                            </p>
-                          ) : null}
+                          <p>You owe {inr(reminder.amount_cents / 100)} to {reminder.payer_name}. Please settle this amount.</p>
+                          <button
+                            type="button"
+                            className="paid-reminder-button"
+                            onClick={() => confirmReminderPaid(reminder)}
+                            disabled={Boolean(payingReminderId)}
+                          >
+                            {payingReminderId === reminder.id ? 'Sending…' : 'Mark as paid'}
+                          </button>
                         </div>
                       </article>
                     ))}

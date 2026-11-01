@@ -272,12 +272,6 @@ begin
     ) then
       raise exception 'Payment reminder recipient is not a group member';
     end if;
-    if payer_id is not null and not exists (
-      select 1 from group_members
-      where group_id = gid and user_id = payer_id
-    ) then
-      raise exception 'Payment reminder payer is not a group member';
-    end if;
   end loop;
 
   update debt_reminders existing
@@ -297,6 +291,12 @@ begin
   loop
     debtor_id := (reminder->>'debtor_user_id')::uuid;
     payer_id := nullif(reminder->>'payer_user_id', '')::uuid;
+    if payer_id is not null and not exists (
+      select 1 from group_members
+      where group_id = gid and user_id = payer_id
+    ) then
+      payer_id := null;
+    end if;
     reminder_payer := btrim(reminder->>'payer_name');
     reminder_amount := (reminder->>'amount_cents')::bigint;
     insert into debt_reminders (group_id, debtor_user_id, payer_user_id, payer_name, payer_key, amount_cents)
@@ -371,19 +371,13 @@ begin
     and debtor_user_id = auth.uid()
     and amount_cents > 0
     and paid_at is null
-    and payer_user_id is not null
   returning * into reminder_row;
 
   if not found then
     raise exception 'This reminder is no longer active or its payer cannot be notified';
   end if;
-  if not is_group_member(reminder_row.group_id)
-     or not exists (
-       select 1 from group_members
-       where group_id = reminder_row.group_id
-         and user_id = reminder_row.payer_user_id
-     ) then
-    raise exception 'The payer must still be a member of this group to receive a notification';
+  if not is_group_member(reminder_row.group_id) then
+    raise exception 'You must still be a member of this group to confirm payment';
   end if;
 
   select coalesce(nullif(btrim(username), ''), 'A group member')
@@ -392,19 +386,26 @@ begin
   where user_id = auth.uid();
   debtor_name_value := coalesce(debtor_name_value, 'A group member');
 
-  insert into payment_notifications (
-    group_id, recipient_user_id, debtor_user_id, debtor_name, amount_cents,
-    notification_type, payer_name, read_at
-  ) values (
-    reminder_row.group_id,
-    reminder_row.payer_user_id,
-    auth.uid(),
-    debtor_name_value,
-    reminder_row.amount_cents,
-    'payment_reported',
-    reminder_row.payer_name,
-    null
-  );
+  if reminder_row.payer_user_id is not null
+     and exists (
+       select 1 from group_members
+       where group_id = reminder_row.group_id
+         and user_id = reminder_row.payer_user_id
+     ) then
+    insert into payment_notifications (
+      group_id, recipient_user_id, debtor_user_id, debtor_name, amount_cents,
+      notification_type, payer_name, read_at
+    ) values (
+      reminder_row.group_id,
+      reminder_row.payer_user_id,
+      auth.uid(),
+      debtor_name_value,
+      reminder_row.amount_cents,
+      'payment_reported',
+      reminder_row.payer_name,
+      null
+    );
+  end if;
 
   insert into payment_notifications (
     group_id, recipient_user_id, debtor_user_id, debtor_name, amount_cents,
