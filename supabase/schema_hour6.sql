@@ -328,24 +328,38 @@ create table if not exists payment_notifications (
   debtor_user_id     uuid not null references auth.users(id) on delete cascade,
   debtor_name        text not null,
   amount_cents       bigint not null check (amount_cents > 0),
+  notification_type  text not null default 'payment_reported',
+  payer_name         text,
+  read_at            timestamptz,
   created_at         timestamptz not null default now()
 );
+
+alter table payment_notifications
+  add column if not exists notification_type text not null default 'payment_reported';
+alter table payment_notifications add column if not exists payer_name text;
+alter table payment_notifications add column if not exists read_at timestamptz;
 
 alter table payment_notifications enable row level security;
 
 drop policy if exists "see my payment notifications" on payment_notifications;
+drop policy if exists "mark my payment notifications read" on payment_notifications;
 create policy "see my payment notifications" on payment_notifications
   for select using (recipient_user_id = auth.uid() and is_group_member(group_id));
+create policy "mark my payment notifications read" on payment_notifications
+  for update using (recipient_user_id = auth.uid() and is_group_member(group_id))
+  with check (recipient_user_id = auth.uid() and is_group_member(group_id));
 
 revoke all on payment_notifications from anon, authenticated;
-grant select on payment_notifications to authenticated;
+grant select, update (read_at) on payment_notifications to authenticated;
 
-create or replace function confirm_debt_reminder_paid(reminder_id uuid)
-returns void language plpgsql security definer
+drop function if exists confirm_debt_reminder_paid(uuid);
+create function confirm_debt_reminder_paid(reminder_id uuid)
+returns uuid language plpgsql security definer
 set search_path = public as $$
 declare
   reminder_row debt_reminders%rowtype;
   debtor_name_value text;
+  marked_notification_id uuid;
 begin
   if auth.uid() is null then
     raise exception 'You must be signed in to confirm a payment';
@@ -379,14 +393,33 @@ begin
   debtor_name_value := coalesce(debtor_name_value, 'A group member');
 
   insert into payment_notifications (
-    group_id, recipient_user_id, debtor_user_id, debtor_name, amount_cents
+    group_id, recipient_user_id, debtor_user_id, debtor_name, amount_cents,
+    notification_type, payer_name, read_at
   ) values (
     reminder_row.group_id,
     reminder_row.payer_user_id,
     auth.uid(),
     debtor_name_value,
-    reminder_row.amount_cents
+    reminder_row.amount_cents,
+    'payment_reported',
+    reminder_row.payer_name,
+    null
   );
+
+  insert into payment_notifications (
+    group_id, recipient_user_id, debtor_user_id, debtor_name, amount_cents,
+    notification_type, payer_name, read_at
+  ) values (
+    reminder_row.group_id,
+    auth.uid(),
+    auth.uid(),
+    debtor_name_value,
+    reminder_row.amount_cents,
+    'marked_as_paid',
+    reminder_row.payer_name,
+    now()
+  ) returning id into marked_notification_id;
+  return marked_notification_id;
 end; $$;
 
 revoke all on function confirm_debt_reminder_paid(uuid) from public;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabaseClient';
 
@@ -153,6 +153,7 @@ export default function Home() {
   const [profileSaveError, setProfileSaveError] = useState('');
   const [chatConnectionStatus, setChatConnectionStatus] = useState('offline');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const markingPaymentNotificationsReadRef = useRef(false);
   const [text, setText] = useState('');
   const [splitMode, setSplitMode] = useState('equal');
   const [customUnit, setCustomUnit] = useState('amount');
@@ -341,11 +342,10 @@ export default function Home() {
         try {
           const { data, error } = await supabase
             .from('debt_reminders')
-            .select('id, group_id, payer_name, payer_user_id, amount_cents, updated_at')
+            .select('id, group_id, payer_name, payer_user_id, amount_cents, paid_at, updated_at')
             .eq('group_id', groupId)
             .eq('debtor_user_id', session.user.id)
             .gt('amount_cents', 0)
-            .is('paid_at', null)
             .order('updated_at', { ascending: false });
           if (error) throw error;
           if (active) setDebtReminders(data || []);
@@ -362,7 +362,7 @@ export default function Home() {
         try {
           const { data, error } = await supabase
             .from('payment_notifications')
-            .select('id, group_id, debtor_name, amount_cents, created_at')
+            .select('id, group_id, debtor_name, amount_cents, notification_type, payer_name, read_at, created_at')
             .eq('group_id', groupId)
             .eq('recipient_user_id', session.user.id)
             .order('created_at', { ascending: false });
@@ -394,15 +394,14 @@ export default function Home() {
           supabase.from('group_profiles').select('user_id, username'),
           supabase
             .from('debt_reminders')
-            .select('id, group_id, payer_name, payer_user_id, amount_cents, updated_at')
+            .select('id, group_id, payer_name, payer_user_id, amount_cents, paid_at, updated_at')
             .eq('group_id', groupId)
             .eq('debtor_user_id', session.user.id)
             .gt('amount_cents', 0)
-            .is('paid_at', null)
             .order('updated_at', { ascending: false }),
           supabase
             .from('payment_notifications')
-            .select('id, group_id, debtor_name, amount_cents, created_at')
+            .select('id, group_id, debtor_name, amount_cents, notification_type, payer_name, read_at, created_at')
             .eq('group_id', groupId)
             .eq('recipient_user_id', session.user.id)
             .order('created_at', { ascending: false })
@@ -596,17 +595,66 @@ export default function Home() {
     setPayingReminderId(reminder.id);
     setDebtReminderError('');
     try {
-      const { error } = await supabase.rpc('confirm_debt_reminder_paid', {
+      const { data: notificationId, error } = await supabase.rpc('confirm_debt_reminder_paid', {
         reminder_id: reminder.id
       });
       if (error) throw error;
-      setDebtReminders((current) => current.filter((item) => item.id !== reminder.id));
+      const markedAt = new Date().toISOString();
+      setDebtReminders((current) => current.map((item) => (
+        item.id === reminder.id ? { ...item, paid_at: markedAt } : item
+      )));
+      if (notificationId) {
+        setPaymentNotifications((current) => [
+          {
+            id: notificationId,
+            group_id: groupId,
+            debtor_name: chatProfiles[session.user.id] || username.trim() || 'You',
+            amount_cents: reminder.amount_cents,
+            notification_type: 'marked_as_paid',
+            payer_name: reminder.payer_name,
+            read_at: markedAt,
+            created_at: markedAt
+          },
+          ...current.filter((notification) => notification.id !== notificationId)
+        ]);
+      }
     } catch (error) {
       setDebtReminderError(error.message || 'Could not notify the payer that you have paid.');
     } finally {
       setPayingReminderId('');
     }
   };
+
+  const markPaymentNotificationsRead = useCallback(async () => {
+    if (!groupId || markingPaymentNotificationsReadRef.current) return;
+    if (!paymentNotifications.some((notification) => !notification.read_at)) return;
+
+    markingPaymentNotificationsReadRef.current = true;
+    setDebtReminderError('');
+    const readAt = new Date().toISOString();
+    try {
+      const { data, error } = await supabase
+        .from('payment_notifications')
+        .update({ read_at: readAt })
+        .eq('group_id', groupId)
+        .eq('recipient_user_id', session.user.id)
+        .is('read_at', null)
+        .select('id');
+      if (error) throw error;
+      const readIds = new Set((data || []).map((notification) => notification.id));
+      setPaymentNotifications((current) => current.map((notification) => (
+        readIds.has(notification.id) ? { ...notification, read_at: readAt } : notification
+      )));
+    } catch (error) {
+      setDebtReminderError(error.message || 'Could not mark payment notifications as read.');
+    } finally {
+      markingPaymentNotificationsReadRef.current = false;
+    }
+  }, [groupId, paymentNotifications, session?.user?.id]);
+
+  useEffect(() => {
+    if (notificationsOpen) markPaymentNotificationsRead();
+  }, [notificationsOpen, markPaymentNotificationsRead]);
 
   const copyInviteCode = async () => {
     if (!currentGroup?.join_code) return;
@@ -889,6 +937,8 @@ export default function Home() {
   ]);
 
   const currentGroup = groups.find((g) => g.id === groupId);
+  const activeDebtReminderCount = debtReminders.filter((reminder) => !reminder.paid_at).length;
+  const unreadPaymentNotificationCount = paymentNotifications.filter((notification) => !notification.read_at).length;
   const actionMenuGroup = groups.find((group) => group.id === groupActionMenuId);
 
   const handleGroupPickerKeyDown = (event, index = -1) => {
@@ -1125,7 +1175,9 @@ export default function Home() {
               className="notification-toggle"
               aria-label={notificationsOpen
                 ? 'Close notifications'
-                : `Open notifications${debtReminders.length + paymentNotifications.length > 0 ? `, ${debtReminders.length + paymentNotifications.length} payment notifications` : ''}`}
+                : `Open notifications${activeDebtReminderCount + unreadPaymentNotificationCount > 0
+                  ? `, ${activeDebtReminderCount + unreadPaymentNotificationCount} unread payment notifications`
+                  : ''}`}
               aria-expanded={notificationsOpen}
               aria-controls="group-notifications"
               onClick={() => setNotificationsOpen((open) => !open)}
@@ -1137,9 +1189,9 @@ export default function Home() {
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
                 <path d="M10 21h4" />
               </svg>
-              {debtReminders.length + paymentNotifications.length > 0 && (
+              {activeDebtReminderCount + unreadPaymentNotificationCount > 0 && (
                 <span className="notification-badge" aria-hidden="true">
-                  {debtReminders.length + paymentNotifications.length}
+                  {activeDebtReminderCount + unreadPaymentNotificationCount}
                 </span>
               )}
             </button>
@@ -1170,30 +1222,37 @@ export default function Home() {
                     {loadingChat && chatMessages.length === 0 && debtReminders.length === 0 && paymentNotifications.length === 0 && <p className="chat-empty">Loading notifications…</p>}
                     {!loadingChat && !chatError && chatMessages.length === 0 && debtReminders.length === 0 && paymentNotifications.length === 0 && <p className="chat-empty">No notifications yet.</p>}
                     {debtReminders.map((reminder) => (
-                      <article key={reminder.id} className="chat-notification debt-reminder-notification">
+                      <article
+                        key={reminder.id}
+                        className={`chat-notification debt-reminder-notification${reminder.paid_at ? ' payment-confirmation-notification' : ''}`}
+                      >
                         <span className="chat-notification-avatar" aria-hidden="true">₹</span>
                         <div className="chat-notification-content">
                           <div className="chat-notification-meta">
-                            <strong>Payment reminder</strong>
+                            <strong>{reminder.paid_at ? 'Marked as paid' : 'Payment reminder'}</strong>
                             <time dateTime={reminder.updated_at}>
-                              {new Date(reminder.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                              {new Date(reminder.paid_at || reminder.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                             </time>
                           </div>
-                          <p>You owe {inr(reminder.amount_cents / 100)} to {reminder.payer_name}. Please settle this amount.</p>
-                          {reminder.payer_user_id ? (
+                          <p>
+                            {reminder.paid_at
+                              ? `You marked ${inr(reminder.amount_cents / 100)} paid to ${reminder.payer_name}.`
+                              : `You owe ${inr(reminder.amount_cents / 100)} to ${reminder.payer_name}. Please settle this amount.`}
+                          </p>
+                          {!reminder.paid_at && reminder.payer_user_id ? (
                             <button
                               type="button"
                               className="paid-reminder-button"
                               onClick={() => confirmReminderPaid(reminder)}
                               disabled={Boolean(payingReminderId)}
                             >
-                              {payingReminderId === reminder.id ? 'Sending…' : 'Paid'}
+                              {payingReminderId === reminder.id ? 'Sending…' : 'Mark as paid'}
                             </button>
-                          ) : (
+                          ) : !reminder.paid_at ? (
                             <p className="reminder-unavailable">
                               This payer is not a group member, so they cannot receive an in-app payment notification.
                             </p>
-                          )}
+                          ) : null}
                         </div>
                       </article>
                     ))}
@@ -1202,12 +1261,16 @@ export default function Home() {
                         <span className="chat-notification-avatar" aria-hidden="true">✓</span>
                         <div className="chat-notification-content">
                           <div className="chat-notification-meta">
-                            <strong>Payment reported</strong>
+                            <strong>{notification.notification_type === 'marked_as_paid' ? 'Marked as paid' : 'Payment reported'}</strong>
                             <time dateTime={notification.created_at}>
                               {new Date(notification.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                             </time>
                           </div>
-                          <p>{notification.debtor_name} says they paid you {inr(notification.amount_cents / 100)}.</p>
+                          <p>
+                            {notification.notification_type === 'marked_as_paid'
+                              ? `You marked ${inr(notification.amount_cents / 100)} paid to ${notification.payer_name || 'the payer'}.`
+                              : `${notification.debtor_name} says they paid you ${inr(notification.amount_cents / 100)}.`}
+                          </p>
                         </div>
                       </article>
                     ))}
