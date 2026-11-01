@@ -61,6 +61,13 @@ git push
 
 ---
 
+## Enable group chat
+
+Group chat uses Supabase Database and Realtime. In the Supabase dashboard, open **SQL Editor**,
+run `supabase/schema_hour6.sql`, then reload the app. This re-runnable schema creates the
+group-message table, restricts access to group members, and adds the table to the Realtime
+publication.
+
 ## What's inside
 
 | | |

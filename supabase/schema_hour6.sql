@@ -86,16 +86,53 @@ drop policy if exists "see my groups"         on groups;
 drop policy if exists "create groups"         on groups;
 drop policy if exists "see my memberships"    on group_members;
 drop policy if exists "join groups"           on group_members;
+drop policy if exists "leave groups"          on group_members;
 drop policy if exists "see group expenses"    on expenses;
 drop policy if exists "add group expenses"    on expenses;
 drop policy if exists "delete group expenses" on expenses;
 
-create policy "see my groups"      on groups for select using (is_group_member(id) or auth.uid() = created_by);
+create policy "see my groups"      on groups for select using (is_group_member(id));
 create policy "create groups"      on groups for insert with check (auth.uid() = created_by);
 
 create policy "see my memberships" on group_members for select using (user_id = auth.uid());
 create policy "join groups"        on group_members for insert with check (user_id = auth.uid());
+create policy "leave groups"       on group_members for delete using (user_id = auth.uid());
 
 create policy "see group expenses"    on expenses for select using (is_group_member(group_id));
 create policy "add group expenses"    on expenses for insert with check (is_group_member(group_id));
 create policy "delete group expenses" on expenses for delete using (is_group_member(group_id));
+
+-- group chat messages are visible only to members; authors cannot impersonate another user.
+create table if not exists group_messages (
+  id         uuid primary key default gen_random_uuid(),
+  group_id   uuid not null references groups(id) on delete cascade,
+  user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  message    text not null check (char_length(btrim(message)) between 1 and 1000),
+  created_at timestamptz not null default now()
+);
+
+alter table group_messages enable row level security;
+
+drop policy if exists "see group messages" on group_messages;
+drop policy if exists "send group messages" on group_messages;
+
+create policy "see group messages" on group_messages
+  for select using (is_group_member(group_id));
+create policy "send group messages" on group_messages
+  for insert with check (user_id = auth.uid() and is_group_member(group_id));
+
+revoke all on group_messages from anon, authenticated;
+grant select, insert on group_messages to authenticated;
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime'
+         and schemaname = 'public'
+         and tablename = 'group_messages'
+     ) then
+    alter publication supabase_realtime add table public.group_messages;
+  end if;
+end $$;
