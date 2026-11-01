@@ -24,6 +24,34 @@ create table if not exists group_members (
   primary key (group_id, user_id)
 );
 
+-- create a group and its creator membership together
+create or replace function create_group(group_name text)
+returns uuid language plpgsql security definer
+set search_path = public as $$
+declare
+  new_group_id uuid;
+  current_user_id uuid := auth.uid();
+begin
+  if current_user_id is null then
+    raise exception 'You must be signed in to create a group';
+  end if;
+  if nullif(trim(group_name), '') is null then
+    raise exception 'Group name cannot be empty';
+  end if;
+
+  insert into groups (name, created_by)
+  values (trim(group_name), current_user_id)
+  returning id into new_group_id;
+
+  insert into group_members (group_id, user_id)
+  values (new_group_id, current_user_id);
+
+  return new_group_id;
+end; $$;
+
+revoke all on function create_group(text) from public;
+grant execute on function create_group(text) to authenticated;
+
 -- every expense now belongs to a group
 alter table expenses add column if not exists group_id uuid references groups(id) on delete cascade;
 
@@ -62,7 +90,7 @@ drop policy if exists "see group expenses"    on expenses;
 drop policy if exists "add group expenses"    on expenses;
 drop policy if exists "delete group expenses" on expenses;
 
-create policy "see my groups"      on groups for select using (is_group_member(id));
+create policy "see my groups"      on groups for select using (is_group_member(id) or auth.uid() = created_by);
 create policy "create groups"      on groups for insert with check (auth.uid() = created_by);
 
 create policy "see my memberships" on group_members for select using (user_id = auth.uid());
