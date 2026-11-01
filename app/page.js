@@ -50,11 +50,20 @@ export default function Home() {
       });
       const data = await res.json();
       if (data.error) { alert('AI error: ' + data.error); return; }
+      
       const { data: rows, error } = await supabase.from('expenses')
         .insert({ user_id: session.user.id, name: data.description || t, paid_by: 'You', amount: data.amount || 0 })
         .select();
       if (error) { alert('Save error: ' + error.message); return; }
-      setExpenses((list) => [...list, rows[0]]);
+
+      // Attach AI split breakdown locally for UI rendering
+      const newExpense = {
+        ...rows[0],
+        people: data.people || [],
+        each: data.each || 0
+      };
+
+      setExpenses((list) => [...list, newExpense]);
       setText('');
     } catch (e) { alert('Could not add: ' + e.message); }
   };
@@ -104,6 +113,13 @@ export default function Home() {
               <div style={styles.itemMain}>
                 <div style={styles.itemName}>{e.name}</div>
                 <div style={styles.itemPaid}>paid by {e.paid_by}</div>
+                
+                {/* Renders split breakdown if people array exists */}
+                {e.people && e.people.length > 0 && (
+                  <div style={styles.itemSplit}>
+                    Split with: {e.people.join(', ')} ({inr(e.each)} each)
+                  </div>
+                )}
               </div>
               <div style={styles.itemAmount}>{inr(e.amount)}</div>
               <button style={styles.remove} onClick={() => removeExpense(e.id)}>×</button>
@@ -137,6 +153,7 @@ const styles = {
   itemMain: { flex: 1, minWidth: 0 },
   itemName: { fontWeight: 700, fontSize: 15 },
   itemPaid: { color: 'var(--muted)', fontSize: 12.5, marginTop: 1 },
+  itemSplit: { color: '#1C5FD4', fontSize: 12, fontWeight: 600, marginTop: 3 }, // Added style for split breakdown text
   itemAmount: { fontWeight: 800, fontSize: 15.5 },
   remove: { flex: 'none', width: 26, height: 26, borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' },
   total: { textAlign: 'center', marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--line)', fontWeight: 800, fontSize: 16 },
