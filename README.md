@@ -66,7 +66,15 @@ git push
 Group chat uses Supabase Database and Realtime. In the Supabase dashboard, open **SQL Editor**,
 run or rerun `supabase/schema_hour6.sql`, then reload the app. This re-runnable schema creates
 the group-message and username-profile tables, restricts access to group members, and adds the
-tables to the Realtime publication.
+tables to the Realtime publication. It also enables member-based payer selection and stores
+equal or custom per-person expense shares. Rerun the schema after pulling changes to add the
+shares column, the group rename permission, and recipient-only debt reminders and payment
+confirmations. Net balances are synced to the reminder feed; members who owe money see the amount
+and payee in their notification tab and can mark it paid to notify the payer, including a live
+bell badge while the app is open. Group members can open the group actions menu to
+view the member list, rename the group, or remove themselves from the group list. The selected
+group's notification history can be permanently cleared with
+**Clear all** in the app; the action requires confirmation and affects every member.
 
 ## What's inside
 
